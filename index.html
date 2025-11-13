@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <title>Chat Demo</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+        :root {
+            color-scheme: light dark;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+                sans-serif;
+        }
+
+        body {
+            margin: 0;
+            padding: 24px;
+            background: #11161c;
+            color: #f5f6f8;
+            display: flex;
+            justify-content: center;
+        }
+
+        main {
+            width: min(800px, 100%);
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            background: #1a212b;
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 1.75rem;
+        }
+
+        form {
+            display: grid;
+            gap: 12px;
+        }
+
+        label {
+            display: flex;
+            flex-direction: column;
+            font-size: 0.9rem;
+            gap: 6px;
+        }
+
+        input,
+        textarea,
+        button {
+            font: inherit;
+            border-radius: 8px;
+            border: 1px solid #394150;
+            background: #242c37;
+            color: inherit;
+            padding: 10px 12px;
+        }
+
+        textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+
+        button {
+            cursor: pointer;
+            background: #2f81f7;
+            border: none;
+            font-weight: 600;
+            transition: background 0.2s ease;
+        }
+
+        button:hover {
+            background: #2366c3;
+        }
+
+        .conversation {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            padding: 16px;
+            border-radius: 12px;
+            background: #121820;
+            max-height: 360px;
+            overflow-y: auto;
+        }
+
+        .message {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding: 12px;
+            border-radius: 10px;
+            background: #202834;
+        }
+
+        .message.user {
+            align-self: flex-end;
+            background: #2f81f7;
+        }
+
+        .meta {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            opacity: 0.75;
+        }
+
+        .error {
+            padding: 12px;
+            border-radius: 8px;
+            background: #3b1d1d;
+            color: #ffb4b4;
+        }
+
+        .status {
+            font-size: 0.85rem;
+            opacity: 0.8;
+        }
+    </style>
+</head>
+
+<body>
+    <main>
+        <h1>Chat API Demo</h1>
+        <p class="status" id="status">Ready.</p>
+
+        <section class="conversation" id="conversation">
+            <p class="status">
+                Conversation appears here. The server returns the session ID so you
+                can resume later.
+            </p>
+        </section>
+
+        <form id="chat-form">
+            <label>
+                User ID
+                <input id="user-id" name="user-id" placeholder="Required" required />
+            </label>
+
+            <label>
+                Session ID
+                <input id="session-id" name="session-id" placeholder="Leave empty to create a new session" />
+            </label>
+
+            <label>
+                Message
+                <textarea id="message" name="message" placeholder="Ask the assistant something" required></textarea>
+            </label>
+
+            <button type="submit">Send</button>
+        </form>
+
+        <div class="error" id="error" hidden></div>
+    </main>
+
+    <script>
+        const API_BASE =
+            window.API_BASE_URL || "http://localhost:8001"; // adjust if needed
+        const statusEl = document.getElementById("status");
+        const errorEl = document.getElementById("error");
+        const conversationEl = document.getElementById("conversation");
+        const form = document.getElementById("chat-form");
+        const sessionInput = document.getElementById("session-id");
+
+        const appendMessage = (sender, content, sessionId) => {
+            const wrapper = document.createElement("article");
+            wrapper.className = `message ${sender}`;
+
+            const meta = document.createElement("div");
+            meta.className = "meta";
+            meta.textContent =
+                (sender === "user" ? "You" : "Assistant") + (sessionId ? ` · ${sessionId}` : "");
+
+            const body = document.createElement("div");
+            body.textContent = content;
+
+            wrapper.append(meta, body);
+            conversationEl.appendChild(wrapper);
+            conversationEl.scrollTop = conversationEl.scrollHeight;
+        };
+
+        const setStatus = (text) => {
+            statusEl.textContent = text;
+        };
+
+        const setError = (text) => {
+            if (!text) {
+                errorEl.hidden = true;
+                errorEl.textContent = "";
+                return;
+            }
+            errorEl.hidden = false;
+            errorEl.textContent = text;
+        };
+
+        const submitForm = async () => {
+            setError("");
+
+            const userId = form["user-id"].value.trim();
+            const sessionId = sessionInput.value.trim() || null;
+            const userInput = form["message"].value.trim();
+
+            if (!userId || !userInput) {
+                setError("User ID and Message are required.");
+                return;
+            }
+
+            appendMessage("user", userInput, sessionId);
+            setStatus("Sending...");
+
+            try {
+                const response = await fetch(`${API_BASE}/chat`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({ user_id: userId, session_id: sessionId, user_input: userInput }),
+                });
+
+                if (!response.ok) {
+                    const { detail } = await response.json().catch(() => ({ detail: response.statusText }));
+                    throw new Error(detail || `Request failed with status ${response.status}`);
+                }
+
+                const data = await response.json();
+                sessionInput.value = data.session_id;
+                appendMessage("assistant", data.bot_response || "(no response)", data.session_id);
+                setStatus(
+                    data.is_complete ? "Conversation complete." : "Awaiting your next message."
+                );
+                form["message"].value = "";
+                form["message"].focus();
+            } catch (error) {
+                setError(error.message);
+                setStatus("Error.");
+            }
+        };
+
+        form.addEventListener("submit", (event) => {
+            event.preventDefault();
+            submitForm();
+        });
+
+        const messageInput = document.getElementById("message");
+        messageInput.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                submitForm();
+            }
+        });
+    </script>
+</body>
+
+</html>
